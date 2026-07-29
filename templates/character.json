@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "char-protagonist",
+  "name": "主角",
+  "status": "alive",
+  "location": "",
+  "realm": "凡人",
+  "identity": "",
+  "current_desire": "",
+  "current_pressure": "",
+  "independent_goal": "",
+  "comic_logic": "",
+  "emotional_anchor": "",
+  "knowledge": [],
+  "items": [],
+  "relationships": {},
+  "last_updated_chapter": 0
+}

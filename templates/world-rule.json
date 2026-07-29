@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "rule-0001",
+  "name": "",
+  "statement": "",
+  "hardness": "hard",
+  "known_exceptions": [],
+  "story_uses": [],
+  "last_updated_chapter": 0
+}

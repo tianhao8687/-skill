@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "title": "未命名修仙小说",
+  "genre": "轻松有趣的原创修仙长篇",
+  "platform_target": "番茄小说",
+  "target_chars": 5000000,
+  "chapter_target_chars": 5500,
+  "target_chapters_estimate": 910,
+  "status": "planning",
+  "current_chapter": 0,
+  "current_volume": 1,
+  "current_arc": "arc-001",
+  "creative_policy": {
+    "canon_is_hard": true,
+    "future_outline_is_soft": true,
+    "allow_emergent_plot": true,
+    "imitate_named_author_style": false
+  },
+  "core_premise": "",
+  "protagonist_contradiction": "",
+  "comic_engine": "",
+  "growth_engine": "",
+  "emotional_core": "",
+  "goldfinger_id": "goldfinger-wanfa-proficiency",
+  "focus_arts": [
+    "剑道",
+    "炼丹",
+    "阵法"
+  ]
+}

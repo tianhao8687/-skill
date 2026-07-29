@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "chapter": 1,
+  "title": "",
+  "summary": "",
+  "location": "",
+  "story_time": {
+    "label": "",
+    "ordinal": 1
+  },
+  "present_characters": [],
+  "posthumous_or_remote_characters": [],
+  "new_facts": [
+    {
+      "id": "fact-0001",
+      "statement": "",
+      "hardness": "hard",
+      "tags": []
+    }
+  ],
+  "character_updates": [
+    {
+      "id": "char-protagonist",
+      "set": {},
+      "add_knowledge": [],
+      "remove_knowledge": [],
+      "relationship_notes": {}
+    }
+  ],
+  "loop_updates": [
+    {
+      "id": "loop-0001",
+      "action": "open",
+      "type": "mystery",
+      "title": "",
+      "note": "",
+      "importance": "medium",
+      "due_hint": ""
+    }
+  ],
+  "goldfinger_update": {
+    "unlock_layers": [],
+    "skills": [],
+    "fusions": [],
+    "materials_add": [],
+    "notes_add": []
+  },
+  "tone": {
+    "dominant": "轻松",
+    "humor_sources": [],
+    "emotional_aftertaste": ""
+  },
+  "next_possibilities": []
+}
