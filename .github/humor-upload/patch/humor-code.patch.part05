@@ -1,0 +1,39 @@
+@@ -160,6 +195,38 @@
+         goldfinger = json.loads((self.root / "state/goldfinger.json").read_text(encoding="utf-8"))
+         self.assertEqual(goldfinger["current_state"]["skills"][0]["stage"], "熟练")
+         self.assertEqual(len(goldfinger["current_state"]["skills"]), 1)
++        humor = json.loads((self.root / "state/humor.json").read_text(encoding="utf-8"))
++        self.assertEqual(len(humor["recent_beats"]), 1)
++        self.assertEqual(humor["recent_beats"][0]["mechanism"], "行动后果")
++        self.assertIn("自动计息", humor["recent_beats"][0]["novelty_key"])
++
++    def test_rejects_unknown_humor_callback(self) -> None:
++        run("new-chapter", str(self.root))
++        (self.root / "chapters/0001.md").write_text("# 第1章\n\n正文。\n", encoding="utf-8")
++        payload = json.loads((self.root / "working/0001-commit.json").read_text(encoding="utf-8"))
++        payload["title"] = "错误回收"
++        payload["summary"] = "尝试推进不存在的长期笑点。"
++        payload["humor_callbacks"] = [
++            {
++                "id": "bit-missing",
++                "action": "advance",
++                "participants": [],
++                "variation": "不存在",
++            }
++        ]
++        (self.root / "working/0001-commit.json").write_text(
++            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
++        )
++        result = run(
++            "commit",
++            str(self.root),
++            "--chapter-file",
++            "chapters/0001.md",
++            "--commit-file",
++            "working/0001-commit.json",
++            expect=2,
++        )
++        self.assertIn("幽默回收项尚未open", result.stderr)
+ 
+     def test_rejects_out_of_order_commit(self) -> None:
+         run("new-chapter", str(self.root), "--chapter", "2")
