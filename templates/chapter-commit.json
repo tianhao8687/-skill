@@ -47,8 +47,13 @@
   },
   "tone": {
     "dominant": "轻松",
+    "scene_mode": "balanced",
     "humor_sources": [],
     "emotional_aftertaste": ""
   },
+  "humor_events": [],
+  "humor_callbacks": [],
+  "humor_patterns_failed": [],
+  "emotion_protection_updates": [],
   "next_possibilities": []
 }
