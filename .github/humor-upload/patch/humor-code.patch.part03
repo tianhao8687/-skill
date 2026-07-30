@@ -1,0 +1,100 @@
+     if args.force:
+         backup_file(root, final_commit_path, "commits")
+-        for state_file in [root / "state/facts.json", root / "state/loops.json", root / "state/goldfinger.json", root / "state/timeline.jsonl"]:
++        for state_file in [root / "state/facts.json", root / "state/loops.json", root / "state/goldfinger.json", root / "state/humor.json", root / "state/timeline.jsonl"]:
+             backup_file(root, state_file, "state")
+ 
+     committed = dict(payload)
+@@ -796,6 +1027,7 @@
+         update_characters(root, committed, chapter)
+         update_loops(root, committed, chapter)
+         update_goldfinger(root, committed, chapter)
++        update_humor(root, committed, chapter)
+         append_timeline(root, committed, chapter)
+ 
+     config["current_chapter"] = max(current, chapter)
+@@ -947,6 +1179,29 @@
+         status_names = {"clue": "已发现线索", "collecting": "收集中", "ready": "条件将成"}
+         print("- 活跃融合：" + "；".join(f"{item.get('name')}（{status_names.get(item.get('status'), item.get('status'))}）" for item in active_fusions[:5]))
+ 
++    humor = load_json(root / "state/humor.json", load_json(skill_root() / "templates/humor.json"))
++    recent_beats = sorted(humor.get("recent_beats", []), key=lambda item: item.get("chapter", 0), reverse=True)[:5]
++    active_bits = [item for item in humor.get("recurring_bits", []) if item.get("status") == "active"]
++    protected = [item for item in humor.get("protected_emotions", []) if item.get("status") == "active"]
++    print("\n## 幽默与情绪状态\n")
++    mode_names = {"light": "轻松", "balanced": "平衡", "tense": "紧张", "combat": "战斗", "climax": "高潮", "grief": "失去与哀伤"}
++    current_mode = humor.get("current_scene_mode", "balanced")
++    print(f"- 最近场景模式：{mode_names.get(current_mode, current_mode)}")
++    if recent_beats:
++        print("- 近期重要幽默：" + "；".join(
++            f"第{item.get('chapter')}章 {item.get('mechanism')} / {item.get('source_character') or '场景'} / {item.get('target') or '无固定对象'}"
++            for item in recent_beats
++        ))
++    else:
++        print("- 近期重要幽默：[暂无记录，不代表章节必须补笑点]")
++    if active_bits:
++        print("- 可回收长期笑点：" + "；".join(f"{item.get('id')}（{item.get('core')}）" for item in active_bits[:5]))
++    if protected:
++        print("- 受保护情绪：" + "；".join(
++            f"{item.get('event_id')} / {item.get('emotion')} / 释放条件：{item.get('release_condition')}"
++            for item in protected[:5]
++        ))
++
+     summaries = recent_summaries(root, chapter, 3)
+     print("\n## 最近章节\n")
+     if not summaries:
+@@ -1058,6 +1313,75 @@
+             if fusion.get("status") not in VALID_FUSION_STATUS:
+                 errors.append(f"融合{fusion.get('id')}status无效")
+ 
++    humor_path = root / "state/humor.json"
++    if not humor_path.exists():
++        warnings.append("缺少state/humor.json；旧项目可在下次章节提交时自动创建，或从templates/humor.json补齐")
++    else:
++        humor = load_json(humor_path)
++        if humor.get("schema_version") != SCHEMA_VERSION:
++            errors.append("humor.schema_version必须为1")
++        if humor.get("current_scene_mode", "balanced") not in VALID_SCENE_MODES:
++            errors.append(f"humor.current_scene_mode无效: {humor.get('current_scene_mode')}")
++        if int(humor.get("last_updated_chapter", 0)) > current:
++            errors.append("humor.last_updated_chapter超过当前章节")
++        beat_ids: set[str] = set()
++        recent_window: list[dict[str, Any]] = []
++        for beat in humor.get("recent_beats", []):
++            beat_id = beat.get("id")
++            if not beat_id or not beat.get("mechanism") or not beat.get("novelty_key"):
++                errors.append("recent_beats中的每条记录都需要id、mechanism和novelty_key")
++                continue
++            if beat_id in beat_ids:
++                errors.append(f"重复幽默事件ID：{beat_id}")
++            beat_ids.add(beat_id)
++            if int(beat.get("chapter", 0)) > current:
++                errors.append(f"幽默事件{beat_id}章节超过当前章节")
++            if int(beat.get("chapter", 0)) >= max(1, current - 4):
++                recent_window.append(beat)
++        signatures: dict[tuple[str, str, str], list[int]] = {}
++        novelty_uses: dict[str, list[int]] = {}
++        for beat in recent_window:
++            signature = (
++                str(beat.get("mechanism", "")),
++                str(beat.get("source_character", "")),
++                str(beat.get("target", "")),
++            )
++            signatures.setdefault(signature, []).append(int(beat.get("chapter", 0)))
++            novelty_uses.setdefault(str(beat.get("novelty_key", "")), []).append(int(beat.get("chapter", 0)))
++        for signature, chapters in signatures.items():
++            if len(chapters) >= 3:
++                warnings.append(f"近5章重复相同人物—机制—对象组合{signature}，出现于{chapters}；请检查代价、结果和关系影响是否真正变化")
++        for novelty_key, chapters in novelty_uses.items():
++            if novelty_key and len(chapters) >= 2:
++                warnings.append(f"近5章重复novelty_key={novelty_key}，出现于{chapters}；长期回收应增加新意义")
++        bit_ids: set[str] = set()
++        for bit in humor.get("recurring_bits", []):
++            bit_id = bit.get("id")
++            if not bit_id:
++                errors.append("recurring_bits中的每项都需要id")
++                continue
++            if bit_id in bit_ids:
++                errors.append(f"重复幽默回收项ID：{bit_id}")
++            bit_ids.add(bit_id)
++            if bit.get("status") not in VALID_RECURRING_BIT_STATUS:
