@@ -1,0 +1,140 @@
+        if not isinstance(update.get("set", {}), dict):
+            errors.append(f"人物{update.get('id')}的set必须是对象")
+    for update in data.get("loop_updates", []):
+        if not update.get("id"):
+            errors.append("每条loop_update都需要id")
+        if update.get("action") not in VALID_LOOP_ACTIONS:
+            errors.append(f"事项{update.get('id')}的action无效")
+
+    gf = data.get("goldfinger_update", {})
+    if not isinstance(gf, dict):
+        errors.append("goldfinger_update必须是对象")
+    else:
+        for layer in gf.get("unlock_layers", []):
+            if layer not in VALID_GOLDFINGER_LAYERS:
+                errors.append(f"金手指层级无效: {layer}")
+        for skill in gf.get("skills", []):
+            if not skill.get("id") or not skill.get("name"):
+                errors.append("每条goldfinger skill都需要id和name")
+            stage = skill.get("stage")
+            if stage is not None and stage not in VALID_SKILL_STAGES:
+                errors.append(f"技能{skill.get('id')}的stage无效: {stage}")
+            if not isinstance(skill.get("traits_add", []), list):
+                errors.append(f"技能{skill.get('id')}的traits_add必须是数组")
+        for fusion in gf.get("fusions", []):
+            if not fusion.get("id") or not fusion.get("name"):
+                errors.append("每条goldfinger fusion都需要id和name")
+            tier = fusion.get("tier")
+            if tier is not None and tier not in VALID_FUSION_TIERS:
+                errors.append(f"融合{fusion.get('id')}的tier无效: {tier}")
+            status = fusion.get("status")
+            if status is not None and status not in VALID_FUSION_STATUS:
+                errors.append(f"融合{fusion.get('id')}的status无效: {status}")
+            if not isinstance(fusion.get("completed_requirements_add", []), list):
+                errors.append(f"融合{fusion.get('id')}的completed_requirements_add必须是数组")
+        for material in gf.get("materials_add", []):
+            if not isinstance(material, dict) or not material.get("id") or not material.get("name"):
+                errors.append("每条goldfinger material都需要id和name")
+
+    tone = data.get("tone", {})
+    if not isinstance(tone, dict):
+        errors.append("tone必须是对象")
+    else:
+        scene_mode = tone.get("scene_mode")
+        if scene_mode is not None and scene_mode not in VALID_SCENE_MODES:
+            errors.append(f"tone.scene_mode无效: {scene_mode}")
+
+    events = data.get("humor_events", [])
+    if not isinstance(events, list):
+        errors.append("humor_events必须是数组")
+    else:
+        event_ids: set[str] = set()
+        for event in events:
+            if not isinstance(event, dict):
+                errors.append("每条humor_event必须是对象")
+                continue
+            event_id = str(event.get("id", "")).strip()
+            if not event_id or not str(event.get("mechanism", "")).strip() or not str(event.get("novelty_key", "")).strip():
+                errors.append("每条humor_event都需要id、mechanism和novelty_key")
+            if event_id in event_ids:
+                errors.append(f"同一提交中humor_event ID重复: {event_id}")
+            event_ids.add(event_id)
+            if not isinstance(event.get("plot_function", []), list):
+                errors.append(f"幽默事件{event_id or '[未知]'}的plot_function必须是数组")
+
+    callbacks = data.get("humor_callbacks", [])
+    if not isinstance(callbacks, list):
+        errors.append("humor_callbacks必须是数组")
+    else:
+        for update in callbacks:
+            if not isinstance(update, dict) or not update.get("id"):
+                errors.append("每条humor_callback都需要id")
+                continue
+            if update.get("action") not in VALID_HUMOR_CALLBACK_ACTIONS:
+                errors.append(f"幽默回收项{update.get('id')}的action无效")
+            if update.get("action") == "open" and not str(update.get("core", "")).strip():
+                errors.append(f"新建幽默回收项{update.get('id')}需要core")
+            if not isinstance(update.get("participants", []), list):
+                errors.append(f"幽默回收项{update.get('id')}的participants必须是数组")
+
+    failed_patterns = data.get("humor_patterns_failed", [])
+    if not isinstance(failed_patterns, list) or any(not isinstance(item, str) for item in failed_patterns):
+        errors.append("humor_patterns_failed必须是字符串数组")
+
+    emotion_updates = data.get("emotion_protection_updates", [])
+    if not isinstance(emotion_updates, list):
+        errors.append("emotion_protection_updates必须是数组")
+    else:
+        for update in emotion_updates:
+            if not isinstance(update, dict) or not update.get("event_id"):
+                errors.append("每条emotion_protection_update都需要event_id")
+                continue
+            if update.get("action") not in VALID_EMOTION_PROTECTION_ACTIONS:
+                errors.append(f"情绪保护{update.get('event_id')}的action无效")
+            if update.get("action") == "open" and (
+                not str(update.get("emotion", "")).strip()
+                or not str(update.get("release_condition", "")).strip()
+            ):
+                errors.append(f"新建情绪保护{update.get('event_id')}需要emotion和release_condition")
+            if not isinstance(update.get("characters", []), list):
+                errors.append(f"情绪保护{update.get('event_id')}的characters必须是数组")
+    return errors
+
+
+def preflight_state_updates(root: Path, commit: dict[str, Any], chapter: int) -> list[str]:
+    """Check semantic state operations before writing any project files."""
+    errors: list[str] = []
+    facts_data = load_json(root / "state/facts.json", {"facts": []})
+    facts_by_id = {item.get("id"): item for item in facts_data.get("facts", [])}
+    for fact in commit.get("new_facts", []):
+        existing = facts_by_id.get(fact.get("id"))
+        if existing and existing.get("statement") != fact.get("statement"):
+            errors.append(f"事实ID重复且内容不同: {fact.get('id')}")
+
+    characters = load_characters(root)
+    remote = set(commit.get("posthumous_or_remote_characters", []))
+    for char_id in commit.get("present_characters", []):
+        if characters.get(char_id, {}).get("status") == "dead" and char_id not in remote:
+            errors.append(f"已死亡人物无说明地作为现场人物出现: {char_id}")
+    for update in commit.get("character_updates", []):
+        status = update.get("set", {}).get("status")
+        if status is not None and status not in VALID_CHARACTER_STATUS:
+            errors.append(f"人物{update.get('id')}的status无效: {status}")
+
+    loops_data = load_json(root / "state/loops.json", {"loops": []})
+    loops_by_id = {item.get("id"): item for item in loops_data.get("loops", [])}
+    for update in commit.get("loop_updates", []):
+        if update.get("action") != "open" and update.get("id") not in loops_by_id:
+            errors.append(f"事项尚未open，不能执行{update.get('action')}: {update.get('id')}")
+
+    goldfinger = load_json(root / "state/goldfinger.json", load_json(skill_root() / "templates/goldfinger.json"))
+    current_state = goldfinger.get("current_state", {})
+    skills_by_id = {item.get("id"): item for item in current_state.get("skills", [])}
+    for update in commit.get("goldfinger_update", {}).get("skills", []):
+        existing = skills_by_id.get(update.get("id"))
+        new_stage = update.get("stage")
+        old_stage = existing.get("stage") if existing else None
+        if old_stage in VALID_SKILL_STAGES and new_stage in VALID_SKILL_STAGES:
+            if VALID_SKILL_STAGES.index(new_stage) < VALID_SKILL_STAGES.index(old_stage):
+                errors.append(f"技能阶段不能倒退: {update.get('id')} {old_stage} -> {new_stage}")
+
