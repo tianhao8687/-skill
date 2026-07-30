@@ -45,6 +45,7 @@ python scripts/novelctl.py commit <项目目录> \
 - `commits/0012.json`
 - `summaries/0012.json`
 - `state/goldfinger.json`
+- `state/humor.json`
 - `state/facts.json`
 - `state/loops.json`
 - `state/timeline.jsonl`
@@ -69,5 +70,6 @@ python scripts/novelctl.py status <项目目录>
 - 第一次提交某章后默认不可覆盖；需要修文时使用 `--force`，脚本会保存旧提交备份。
 - 脚本只验证结构和明确状态冲突，不能代替文学判断。
 - `next_possibilities`不会写入硬事实。
+- `humor_events`只记录需要长期追踪的重要事件；脚本不会因为笑点数量少而报错，也不会自动改写正文。
 - `interpreted`和`rumor`事实允许后续正文推翻。
 - 若脚本报告正文与提交字数不一致，应先重新读取正文再决定。

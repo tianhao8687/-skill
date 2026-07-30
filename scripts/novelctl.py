@@ -30,6 +30,11 @@ VALID_GOLDFINGER_LAYERS = {"proficiency", "hundred_arts", "fusion"}
 VALID_SKILL_STAGES = ["入门", "熟练", "精通", "圆满", "化境"]
 VALID_FUSION_TIERS = {"minor", "core", "dao"}
 VALID_FUSION_STATUS = {"clue", "collecting", "ready", "completed", "failed", "dormant"}
+VALID_SCENE_MODES = {"light", "balanced", "tense", "combat", "climax", "grief"}
+VALID_HUMOR_CALLBACK_ACTIONS = {"open", "advance", "pause", "resume", "close"}
+VALID_RECURRING_BIT_STATUS = {"active", "paused", "closed"}
+VALID_EMOTION_PROTECTION_ACTIONS = {"open", "update", "release"}
+VALID_EMOTION_PROTECTION_STATUS = {"active", "released"}
 
 
 def now_iso() -> str:
@@ -190,6 +195,8 @@ def init_project(args: argparse.Namespace) -> None:
     atomic_write_json(root / "state/characters/char-protagonist.json", protagonist)
     goldfinger = load_json(skill_root() / "templates/goldfinger.json")
     atomic_write_json(root / "state/goldfinger.json", goldfinger)
+    humor = load_json(skill_root() / "templates/humor.json")
+    atomic_write_json(root / "state/humor.json", humor)
     atomic_write_text(
         root / "README.md",
         f"# {args.title}\n\n目标约 {args.target_chars:,} 字，估算约 {estimate} 章。\n\n"
@@ -231,6 +238,16 @@ def new_chapter(args: argparse.Namespace) -> None:
         "materials_add": [],
         "notes_add": [],
     }
+    commit_data["tone"] = {
+        "dominant": "轻松",
+        "scene_mode": "balanced",
+        "humor_sources": [],
+        "emotional_aftertaste": "",
+    }
+    commit_data["humor_events"] = []
+    commit_data["humor_callbacks"] = []
+    commit_data["humor_patterns_failed"] = []
+    commit_data["emotion_protection_updates"] = []
     atomic_write_json(commit_path, commit_data)
     if not chapter_path.exists() or args.force:
         atomic_write_text(chapter_path, f"# 第{number}章 [临时标题]\n\n")
@@ -298,6 +315,69 @@ def validate_commit_payload(data: dict[str, Any], chapter: int) -> list[str]:
         for material in gf.get("materials_add", []):
             if not isinstance(material, dict) or not material.get("id") or not material.get("name"):
                 errors.append("每条goldfinger material都需要id和name")
+
+    tone = data.get("tone", {})
+    if not isinstance(tone, dict):
+        errors.append("tone必须是对象")
+    else:
+        scene_mode = tone.get("scene_mode")
+        if scene_mode is not None and scene_mode not in VALID_SCENE_MODES:
+            errors.append(f"tone.scene_mode无效: {scene_mode}")
+
+    events = data.get("humor_events", [])
+    if not isinstance(events, list):
+        errors.append("humor_events必须是数组")
+    else:
+        event_ids: set[str] = set()
+        for event in events:
+            if not isinstance(event, dict):
+                errors.append("每条humor_event必须是对象")
+                continue
+            event_id = str(event.get("id", "")).strip()
+            if not event_id or not str(event.get("mechanism", "")).strip() or not str(event.get("novelty_key", "")).strip():
+                errors.append("每条humor_event都需要id、mechanism和novelty_key")
+            if event_id in event_ids:
+                errors.append(f"同一提交中humor_event ID重复: {event_id}")
+            event_ids.add(event_id)
+            if not isinstance(event.get("plot_function", []), list):
+                errors.append(f"幽默事件{event_id or '[未知]'}的plot_function必须是数组")
+
+    callbacks = data.get("humor_callbacks", [])
+    if not isinstance(callbacks, list):
+        errors.append("humor_callbacks必须是数组")
+    else:
+        for update in callbacks:
+            if not isinstance(update, dict) or not update.get("id"):
+                errors.append("每条humor_callback都需要id")
+                continue
+            if update.get("action") not in VALID_HUMOR_CALLBACK_ACTIONS:
+                errors.append(f"幽默回收项{update.get('id')}的action无效")
+            if update.get("action") == "open" and not str(update.get("core", "")).strip():
+                errors.append(f"新建幽默回收项{update.get('id')}需要core")
+            if not isinstance(update.get("participants", []), list):
+                errors.append(f"幽默回收项{update.get('id')}的participants必须是数组")
+
+    failed_patterns = data.get("humor_patterns_failed", [])
+    if not isinstance(failed_patterns, list) or any(not isinstance(item, str) for item in failed_patterns):
+        errors.append("humor_patterns_failed必须是字符串数组")
+
+    emotion_updates = data.get("emotion_protection_updates", [])
+    if not isinstance(emotion_updates, list):
+        errors.append("emotion_protection_updates必须是数组")
+    else:
+        for update in emotion_updates:
+            if not isinstance(update, dict) or not update.get("event_id"):
+                errors.append("每条emotion_protection_update都需要event_id")
+                continue
+            if update.get("action") not in VALID_EMOTION_PROTECTION_ACTIONS:
+                errors.append(f"情绪保护{update.get('event_id')}的action无效")
+            if update.get("action") == "open" and (
+                not str(update.get("emotion", "")).strip()
+                or not str(update.get("release_condition", "")).strip()
+            ):
+                errors.append(f"新建情绪保护{update.get('event_id')}需要emotion和release_condition")
+            if not isinstance(update.get("characters", []), list):
+                errors.append(f"情绪保护{update.get('event_id')}的characters必须是数组")
     return errors
 
 
@@ -344,6 +424,20 @@ def preflight_state_updates(root: Path, commit: dict[str, Any], chapter: int) ->
         if existing and existing.get("status") == "completed" and update.get("status") not in {None, "completed"}:
             errors.append(f"已完成融合不能退回未完成状态: {update.get('id')}")
 
+    humor = load_json(root / "state/humor.json", load_json(skill_root() / "templates/humor.json"))
+    beats_by_id = {item.get("id"): item for item in humor.get("recent_beats", [])}
+    for event in commit.get("humor_events", []):
+        if event.get("id") in beats_by_id:
+            errors.append(f"幽默事件ID已存在，不能重复使用: {event.get('id')}")
+    bits_by_id = {item.get("id"): item for item in humor.get("recurring_bits", [])}
+    for update in commit.get("humor_callbacks", []):
+        if update.get("action") != "open" and update.get("id") not in bits_by_id:
+            errors.append(f"幽默回收项尚未open，不能执行{update.get('action')}: {update.get('id')}")
+    emotions_by_id = {item.get("event_id"): item for item in humor.get("protected_emotions", [])}
+    for update in commit.get("emotion_protection_updates", []):
+        if update.get("action") != "open" and update.get("event_id") not in emotions_by_id:
+            errors.append(f"情绪保护尚未open，不能执行{update.get('action')}: {update.get('event_id')}")
+
     timeline_path = root / "state/timeline.jsonl"
     if timeline_path.exists():
         last: dict[str, Any] | None = None
@@ -385,7 +479,7 @@ def ensure_baseline(root: Path) -> None:
     if marker.exists():
         return
     (baseline / "characters").mkdir(parents=True, exist_ok=True)
-    for name in ("facts.json", "loops.json", "goldfinger.json"):
+    for name in ("facts.json", "loops.json", "goldfinger.json", "humor.json"):
         source = root / "state" / name
         if source.exists():
             shutil.copy2(source, baseline / name)
@@ -402,6 +496,7 @@ def restore_baseline(root: Path) -> None:
         ("facts.json", {"schema_version": SCHEMA_VERSION, "facts": []}),
         ("loops.json", {"schema_version": SCHEMA_VERSION, "loops": []}),
         ("goldfinger.json", load_json(skill_root() / "templates/goldfinger.json")),
+        ("humor.json", load_json(skill_root() / "templates/humor.json")),
     ):
         source = baseline / name
         atomic_write_json(root / "state" / name, load_json(source, default))
@@ -427,6 +522,7 @@ def rebuild_state_from_commits(root: Path) -> None:
         update_characters(root, payload, chapter)
         update_loops(root, payload, chapter)
         update_goldfinger(root, payload, chapter)
+        update_humor(root, payload, chapter)
         append_timeline(root, payload, chapter)
         previous = chapter
     config = ensure_project(root)
@@ -699,6 +795,141 @@ def update_goldfinger(root: Path, commit: dict[str, Any], chapter: int) -> None:
     atomic_write_json(path, data)
 
 
+
+
+def update_humor(root: Path, commit: dict[str, Any], chapter: int) -> None:
+    """Track important humor signals without enforcing a joke quota."""
+    path = root / "state/humor.json"
+    data = load_json(path, load_json(skill_root() / "templates/humor.json"))
+
+    tone = commit.get("tone", {})
+    scene_mode = tone.get("scene_mode") if isinstance(tone, dict) else None
+    if scene_mode is not None:
+        if scene_mode not in VALID_SCENE_MODES:
+            fail(f"tone.scene_mode无效: {scene_mode}")
+        data["current_scene_mode"] = scene_mode
+
+    beats = data.setdefault("recent_beats", [])
+    by_id = {item.get("id"): item for item in beats}
+    for event in commit.get("humor_events", []):
+        event_id = event["id"]
+        if event_id in by_id:
+            fail(f"幽默事件ID已存在，不能重复使用: {event_id}")
+        item = dict(event)
+        item.setdefault("scene", "")
+        item.setdefault("source_character", "")
+        item.setdefault("target", "")
+        item.setdefault("plot_function", [])
+        item.setdefault("consequence", "")
+        item.setdefault("callback_id", None)
+        item["chapter"] = chapter
+        beats.append(item)
+        by_id[event_id] = item
+    beats.sort(key=lambda item: (int(item.get("chapter", 0)), str(item.get("id", ""))))
+    if len(beats) > 120:
+        data["recent_beats"] = beats[-120:]
+
+    bits = data.setdefault("recurring_bits", [])
+    bits_by_id = {item.get("id"): item for item in bits}
+    for patch in commit.get("humor_callbacks", []):
+        bit_id = patch["id"]
+        action = patch["action"]
+        item = bits_by_id.get(bit_id)
+        if action == "open":
+            if item is None:
+                item = {
+                    "id": bit_id,
+                    "origin_chapter": chapter,
+                    "participants": list(patch.get("participants", [])),
+                    "core": patch.get("core", bit_id),
+                    "variation_requirement": patch.get(
+                        "variation_requirement",
+                        "每次回收必须增加新信息、关系含义、代价或结果",
+                    ),
+                    "uses": [],
+                    "status": "active",
+                }
+                bits.append(item)
+                bits_by_id[bit_id] = item
+        elif item is None:
+            fail(f"幽默回收项尚未open，不能执行{action}: {bit_id}")
+        if item is None:
+            continue
+        if patch.get("core"):
+            item["core"] = patch["core"]
+        if patch.get("participants"):
+            item["participants"] = list(dict.fromkeys([*item.get("participants", []), *patch["participants"]]))
+        if patch.get("variation_requirement"):
+            item["variation_requirement"] = patch["variation_requirement"]
+        if action in {"open", "advance"}:
+            item.setdefault("uses", []).append({
+                "chapter": chapter,
+                "action": action,
+                "variation": patch.get("variation", ""),
+                "note": patch.get("note", ""),
+            })
+            item["status"] = "active"
+            item["last_used_chapter"] = chapter
+        elif action == "pause":
+            item["status"] = "paused"
+            item["paused_chapter"] = chapter
+        elif action == "resume":
+            item["status"] = "active"
+            item["resumed_chapter"] = chapter
+        elif action == "close":
+            item["status"] = "closed"
+            item["closed_chapter"] = chapter
+        item["last_updated_chapter"] = chapter
+
+    failed = data.setdefault("failed_patterns", [])
+    for pattern in commit.get("humor_patterns_failed", []):
+        failed.append({"chapter": chapter, "pattern": pattern})
+    if len(failed) > 100:
+        data["failed_patterns"] = failed[-100:]
+
+    emotions = data.setdefault("protected_emotions", [])
+    emotions_by_id = {item.get("event_id"): item for item in emotions}
+    for patch in commit.get("emotion_protection_updates", []):
+        event_id = patch["event_id"]
+        action = patch["action"]
+        item = emotions_by_id.get(event_id)
+        if action == "open":
+            if item is None:
+                item = {
+                    "event_id": event_id,
+                    "start_chapter": chapter,
+                    "characters": list(patch.get("characters", [])),
+                    "emotion": patch.get("emotion", ""),
+                    "release_condition": patch.get("release_condition", ""),
+                    "note": patch.get("note", ""),
+                    "status": "active",
+                }
+                emotions.append(item)
+                emotions_by_id[event_id] = item
+        elif item is None:
+            fail(f"情绪保护尚未open，不能执行{action}: {event_id}")
+        if item is None:
+            continue
+        for key in ("emotion", "release_condition", "note"):
+            if patch.get(key):
+                item[key] = patch[key]
+        if patch.get("characters"):
+            item["characters"] = list(dict.fromkeys([*item.get("characters", []), *patch["characters"]]))
+        if action == "release":
+            item["status"] = "released"
+            item["released_chapter"] = chapter
+        else:
+            item["status"] = "active"
+        item["last_updated_chapter"] = chapter
+
+    if scene_mode is not None or any(
+        commit.get(key)
+        for key in ("humor_events", "humor_callbacks", "humor_patterns_failed", "emotion_protection_updates")
+    ):
+        data["last_updated_chapter"] = chapter
+    atomic_write_json(path, data)
+
+
 def append_timeline(root: Path, commit: dict[str, Any], chapter: int) -> None:
     path = root / "state/timeline.jsonl"
     story_time = commit.get("story_time", {})
@@ -758,7 +989,7 @@ def commit_chapter(args: argparse.Namespace) -> None:
 
     if args.force:
         backup_file(root, final_commit_path, "commits")
-        for state_file in [root / "state/facts.json", root / "state/loops.json", root / "state/goldfinger.json", root / "state/timeline.jsonl"]:
+        for state_file in [root / "state/facts.json", root / "state/loops.json", root / "state/goldfinger.json", root / "state/humor.json", root / "state/timeline.jsonl"]:
             backup_file(root, state_file, "state")
 
     committed = dict(payload)
@@ -796,6 +1027,7 @@ def commit_chapter(args: argparse.Namespace) -> None:
         update_characters(root, committed, chapter)
         update_loops(root, committed, chapter)
         update_goldfinger(root, committed, chapter)
+        update_humor(root, committed, chapter)
         append_timeline(root, committed, chapter)
 
     config["current_chapter"] = max(current, chapter)
@@ -947,6 +1179,29 @@ def context_command(args: argparse.Namespace) -> None:
         status_names = {"clue": "已发现线索", "collecting": "收集中", "ready": "条件将成"}
         print("- 活跃融合：" + "；".join(f"{item.get('name')}（{status_names.get(item.get('status'), item.get('status'))}）" for item in active_fusions[:5]))
 
+    humor = load_json(root / "state/humor.json", load_json(skill_root() / "templates/humor.json"))
+    recent_beats = sorted(humor.get("recent_beats", []), key=lambda item: item.get("chapter", 0), reverse=True)[:5]
+    active_bits = [item for item in humor.get("recurring_bits", []) if item.get("status") == "active"]
+    protected = [item for item in humor.get("protected_emotions", []) if item.get("status") == "active"]
+    print("\n## 幽默与情绪状态\n")
+    mode_names = {"light": "轻松", "balanced": "平衡", "tense": "紧张", "combat": "战斗", "climax": "高潮", "grief": "失去与哀伤"}
+    current_mode = humor.get("current_scene_mode", "balanced")
+    print(f"- 最近场景模式：{mode_names.get(current_mode, current_mode)}")
+    if recent_beats:
+        print("- 近期重要幽默：" + "；".join(
+            f"第{item.get('chapter')}章 {item.get('mechanism')} / {item.get('source_character') or '场景'} / {item.get('target') or '无固定对象'}"
+            for item in recent_beats
+        ))
+    else:
+        print("- 近期重要幽默：[暂无记录，不代表章节必须补笑点]")
+    if active_bits:
+        print("- 可回收长期笑点：" + "；".join(f"{item.get('id')}（{item.get('core')}）" for item in active_bits[:5]))
+    if protected:
+        print("- 受保护情绪：" + "；".join(
+            f"{item.get('event_id')} / {item.get('emotion')} / 释放条件：{item.get('release_condition')}"
+            for item in protected[:5]
+        ))
+
     summaries = recent_summaries(root, chapter, 3)
     print("\n## 最近章节\n")
     if not summaries:
@@ -1058,6 +1313,75 @@ def validate_project(args: argparse.Namespace) -> None:
             if fusion.get("status") not in VALID_FUSION_STATUS:
                 errors.append(f"融合{fusion.get('id')}status无效")
 
+    humor_path = root / "state/humor.json"
+    if not humor_path.exists():
+        warnings.append("缺少state/humor.json；旧项目可在下次章节提交时自动创建，或从templates/humor.json补齐")
+    else:
+        humor = load_json(humor_path)
+        if humor.get("schema_version") != SCHEMA_VERSION:
+            errors.append("humor.schema_version必须为1")
+        if humor.get("current_scene_mode", "balanced") not in VALID_SCENE_MODES:
+            errors.append(f"humor.current_scene_mode无效: {humor.get('current_scene_mode')}")
+        if int(humor.get("last_updated_chapter", 0)) > current:
+            errors.append("humor.last_updated_chapter超过当前章节")
+        beat_ids: set[str] = set()
+        recent_window: list[dict[str, Any]] = []
+        for beat in humor.get("recent_beats", []):
+            beat_id = beat.get("id")
+            if not beat_id or not beat.get("mechanism") or not beat.get("novelty_key"):
+                errors.append("recent_beats中的每条记录都需要id、mechanism和novelty_key")
+                continue
+            if beat_id in beat_ids:
+                errors.append(f"重复幽默事件ID：{beat_id}")
+            beat_ids.add(beat_id)
+            if int(beat.get("chapter", 0)) > current:
+                errors.append(f"幽默事件{beat_id}章节超过当前章节")
+            if int(beat.get("chapter", 0)) >= max(1, current - 4):
+                recent_window.append(beat)
+        signatures: dict[tuple[str, str, str], list[int]] = {}
+        novelty_uses: dict[str, list[int]] = {}
+        for beat in recent_window:
+            signature = (
+                str(beat.get("mechanism", "")),
+                str(beat.get("source_character", "")),
+                str(beat.get("target", "")),
+            )
+            signatures.setdefault(signature, []).append(int(beat.get("chapter", 0)))
+            novelty_uses.setdefault(str(beat.get("novelty_key", "")), []).append(int(beat.get("chapter", 0)))
+        for signature, chapters in signatures.items():
+            if len(chapters) >= 3:
+                warnings.append(f"近5章重复相同人物—机制—对象组合{signature}，出现于{chapters}；请检查代价、结果和关系影响是否真正变化")
+        for novelty_key, chapters in novelty_uses.items():
+            if novelty_key and len(chapters) >= 2:
+                warnings.append(f"近5章重复novelty_key={novelty_key}，出现于{chapters}；长期回收应增加新意义")
+        bit_ids: set[str] = set()
+        for bit in humor.get("recurring_bits", []):
+            bit_id = bit.get("id")
+            if not bit_id:
+                errors.append("recurring_bits中的每项都需要id")
+                continue
+            if bit_id in bit_ids:
+                errors.append(f"重复幽默回收项ID：{bit_id}")
+            bit_ids.add(bit_id)
+            if bit.get("status") not in VALID_RECURRING_BIT_STATUS:
+                errors.append(f"幽默回收项{bit_id}状态无效")
+        active_emotions: list[dict[str, Any]] = []
+        emotion_ids: set[str] = set()
+        for emotion in humor.get("protected_emotions", []):
+            event_id = emotion.get("event_id")
+            if not event_id:
+                errors.append("protected_emotions中的每项都需要event_id")
+                continue
+            if event_id in emotion_ids:
+                errors.append(f"重复情绪保护ID：{event_id}")
+            emotion_ids.add(event_id)
+            if emotion.get("status") not in VALID_EMOTION_PROTECTION_STATUS:
+                errors.append(f"情绪保护{event_id}状态无效")
+            if emotion.get("status") == "active":
+                active_emotions.append(emotion)
+        if active_emotions and humor.get("current_scene_mode") == "light":
+            warnings.append("仍有活跃的重大情绪保护，但最近场景模式为light；请确认轻松感没有抹平真实后果")
+
     loops_data = load_json(root / "state/loops.json", {"loops": []})
     for item in loops_data.get("loops", []):
         if item.get("status") not in VALID_LOOP_STATUS:
@@ -1126,6 +1450,9 @@ def status_command(args: argparse.Namespace) -> None:
     characters = load_characters(root)
     goldfinger = load_json(root / "state/goldfinger.json", load_json(skill_root() / "templates/goldfinger.json"))
     gf_state = goldfinger.get("current_state", {})
+    humor = load_json(root / "state/humor.json", load_json(skill_root() / "templates/humor.json"))
+    active_bits = [item for item in humor.get("recurring_bits", []) if item.get("status") == "active"]
+    protected_emotions = [item for item in humor.get("protected_emotions", []) if item.get("status") == "active"]
 
     print(f"# {config.get('title')}\n")
     print(f"- 状态：{config.get('status')}")
@@ -1135,6 +1462,7 @@ def status_command(args: argparse.Namespace) -> None:
     print(f"- 登记人物：{len(characters)}")
     print(f"- 活跃事项：{len(active)}｜休眠事项：{len(sleeping)}")
     print(f"- 已登记技能：{len(gf_state.get('skills', []))}｜融合路线：{len(gf_state.get('fusions', []))}｜已完成融合：{len([item for item in gf_state.get('fusions', []) if item.get('status') == 'completed'])}")
+    print(f"- 近期重要幽默：{len(humor.get('recent_beats', []))}｜活跃回收项：{len(active_bits)}｜受保护情绪：{len(protected_emotions)}")
     if active:
         print("\n## 重要活跃事项")
         active.sort(key=lambda item: ({"high": 3, "medium": 2, "low": 1}.get(item.get("importance"), 0), item.get("last_advanced_chapter", 0)), reverse=True)

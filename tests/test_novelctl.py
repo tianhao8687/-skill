@@ -104,9 +104,36 @@ class NovelCtlTests(unittest.TestCase):
             },
             "tone": {
                 "dominant": "轻松",
+                "scene_mode": "balanced",
                 "humor_sources": ["制度荒谬"],
                 "emotional_aftertaste": "好奇",
             },
+            "humor_events": [
+                {
+                    "id": "humor-0001",
+                    "scene": "测灵场",
+                    "mechanism": "制度荒谬",
+                    "source_character": "char-protagonist",
+                    "target": "天道欠条",
+                    "novelty_key": "测灵结果变成带利息的欠条",
+                    "plot_function": ["建立核心奇点", "表现主角务实反应"],
+                    "consequence": "主角决定先查清欠条规则",
+                    "callback_id": "bit-heavenly-debt",
+                }
+            ],
+            "humor_callbacks": [
+                {
+                    "id": "bit-heavenly-debt",
+                    "action": "open",
+                    "participants": ["char-protagonist"],
+                    "core": "主角每次面对天道规则都会先确认利息和责任人",
+                    "variation_requirement": "每次回收必须改变实际代价或主角与天道的关系",
+                    "variation": "第一次确认欠条存在",
+                    "note": "建立长期回收项",
+                }
+            ],
+            "humor_patterns_failed": [],
+            "emotion_protection_updates": [],
             "next_possibilities": ["查账"],
         }
         (self.root / "working/0001-commit.json").write_text(
@@ -133,6 +160,11 @@ class NovelCtlTests(unittest.TestCase):
         goldfinger = json.loads((self.root / "state/goldfinger.json").read_text(encoding="utf-8"))
         self.assertEqual(goldfinger["current_state"]["skills"][0]["stage"], "入门")
         self.assertEqual(goldfinger["current_state"]["fusions"][0]["status"], "clue")
+        humor = json.loads((self.root / "state/humor.json").read_text(encoding="utf-8"))
+        self.assertEqual(humor["current_scene_mode"], "balanced")
+        self.assertEqual(humor["recent_beats"][0]["id"], "humor-0001")
+        self.assertEqual(humor["recurring_bits"][0]["status"], "active")
+        self.assertIn("近期重要幽默：1", status.stdout)
 
     def test_force_revision_rebuilds_state(self) -> None:
         self.write_chapter_one()
@@ -142,6 +174,9 @@ class NovelCtlTests(unittest.TestCase):
         payload["character_updates"][0]["add_knowledge"] = ["天道欠条会计息"]
         payload["goldfinger_update"]["skills"][0]["stage"] = "熟练"
         payload["goldfinger_update"]["skills"][0]["note"] = "修订后在第一章达到熟练"
+        payload["humor_events"][0]["mechanism"] = "行动后果"
+        payload["humor_events"][0]["novelty_key"] = "欠条开始自动计息并影响入门选择"
+        payload["humor_events"][0]["consequence"] = "主角重新计算入门收益"
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         run(
             "commit",
@@ -160,6 +195,38 @@ class NovelCtlTests(unittest.TestCase):
         goldfinger = json.loads((self.root / "state/goldfinger.json").read_text(encoding="utf-8"))
         self.assertEqual(goldfinger["current_state"]["skills"][0]["stage"], "熟练")
         self.assertEqual(len(goldfinger["current_state"]["skills"]), 1)
+        humor = json.loads((self.root / "state/humor.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(humor["recent_beats"]), 1)
+        self.assertEqual(humor["recent_beats"][0]["mechanism"], "行动后果")
+        self.assertIn("自动计息", humor["recent_beats"][0]["novelty_key"])
+
+    def test_rejects_unknown_humor_callback(self) -> None:
+        run("new-chapter", str(self.root))
+        (self.root / "chapters/0001.md").write_text("# 第1章\n\n正文。\n", encoding="utf-8")
+        payload = json.loads((self.root / "working/0001-commit.json").read_text(encoding="utf-8"))
+        payload["title"] = "错误回收"
+        payload["summary"] = "尝试推进不存在的长期笑点。"
+        payload["humor_callbacks"] = [
+            {
+                "id": "bit-missing",
+                "action": "advance",
+                "participants": [],
+                "variation": "不存在",
+            }
+        ]
+        (self.root / "working/0001-commit.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        result = run(
+            "commit",
+            str(self.root),
+            "--chapter-file",
+            "chapters/0001.md",
+            "--commit-file",
+            "working/0001-commit.json",
+            expect=2,
+        )
+        self.assertIn("幽默回收项尚未open", result.stderr)
 
     def test_rejects_out_of_order_commit(self) -> None:
         run("new-chapter", str(self.root), "--chapter", "2")
