@@ -1,0 +1,100 @@
+--- a/scripts/novelctl.py
++++ b/scripts/novelctl.py
+@@ -30,6 +30,11 @@
+ VALID_SKILL_STAGES = ["入门", "熟练", "精通", "圆满", "化境"]
+ VALID_FUSION_TIERS = {"minor", "core", "dao"}
+ VALID_FUSION_STATUS = {"clue", "collecting", "ready", "completed", "failed", "dormant"}
++VALID_SCENE_MODES = {"light", "balanced", "tense", "combat", "climax", "grief"}
++VALID_HUMOR_CALLBACK_ACTIONS = {"open", "advance", "pause", "resume", "close"}
++VALID_RECURRING_BIT_STATUS = {"active", "paused", "closed"}
++VALID_EMOTION_PROTECTION_ACTIONS = {"open", "update", "release"}
++VALID_EMOTION_PROTECTION_STATUS = {"active", "released"}
+ 
+ 
+ def now_iso() -> str:
+@@ -190,6 +195,8 @@
+     atomic_write_json(root / "state/characters/char-protagonist.json", protagonist)
+     goldfinger = load_json(skill_root() / "templates/goldfinger.json")
+     atomic_write_json(root / "state/goldfinger.json", goldfinger)
++    humor = load_json(skill_root() / "templates/humor.json")
++    atomic_write_json(root / "state/humor.json", humor)
+     atomic_write_text(
+         root / "README.md",
+         f"# {args.title}\n\n目标约 {args.target_chars:,} 字，估算约 {estimate} 章。\n\n"
+@@ -231,6 +238,16 @@
+         "materials_add": [],
+         "notes_add": [],
+     }
++    commit_data["tone"] = {
++        "dominant": "轻松",
++        "scene_mode": "balanced",
++        "humor_sources": [],
++        "emotional_aftertaste": "",
++    }
++    commit_data["humor_events"] = []
++    commit_data["humor_callbacks"] = []
++    commit_data["humor_patterns_failed"] = []
++    commit_data["emotion_protection_updates"] = []
+     atomic_write_json(commit_path, commit_data)
+     if not chapter_path.exists() or args.force:
+         atomic_write_text(chapter_path, f"# 第{number}章 [临时标题]\n\n")
+@@ -298,6 +315,69 @@
+         for material in gf.get("materials_add", []):
+             if not isinstance(material, dict) or not material.get("id") or not material.get("name"):
+                 errors.append("每条goldfinger material都需要id和name")
++
++    tone = data.get("tone", {})
++    if not isinstance(tone, dict):
++        errors.append("tone必须是对象")
++    else:
++        scene_mode = tone.get("scene_mode")
++        if scene_mode is not None and scene_mode not in VALID_SCENE_MODES:
++            errors.append(f"tone.scene_mode无效: {scene_mode}")
++
++    events = data.get("humor_events", [])
++    if not isinstance(events, list):
++        errors.append("humor_events必须是数组")
++    else:
++        event_ids: set[str] = set()
++        for event in events:
++            if not isinstance(event, dict):
++                errors.append("每条humor_event必须是对象")
++                continue
++            event_id = str(event.get("id", "")).strip()
++            if not event_id or not str(event.get("mechanism", "")).strip() or not str(event.get("novelty_key", "")).strip():
++                errors.append("每条humor_event都需要id、mechanism和novelty_key")
++            if event_id in event_ids:
++                errors.append(f"同一提交中humor_event ID重复: {event_id}")
++            event_ids.add(event_id)
++            if not isinstance(event.get("plot_function", []), list):
++                errors.append(f"幽默事件{event_id or '[未知]'}的plot_function必须是数组")
++
++    callbacks = data.get("humor_callbacks", [])
++    if not isinstance(callbacks, list):
++        errors.append("humor_callbacks必须是数组")
++    else:
++        for update in callbacks:
++            if not isinstance(update, dict) or not update.get("id"):
++                errors.append("每条humor_callback都需要id")
++                continue
++            if update.get("action") not in VALID_HUMOR_CALLBACK_ACTIONS:
++                errors.append(f"幽默回收项{update.get('id')}的action无效")
++            if update.get("action") == "open" and not str(update.get("core", "")).strip():
++                errors.append(f"新建幽默回收项{update.get('id')}需要core")
++            if not isinstance(update.get("participants", []), list):
++                errors.append(f"幽默回收项{update.get('id')}的participants必须是数组")
++
++    failed_patterns = data.get("humor_patterns_failed", [])
++    if not isinstance(failed_patterns, list) or any(not isinstance(item, str) for item in failed_patterns):
++        errors.append("humor_patterns_failed必须是字符串数组")
++
++    emotion_updates = data.get("emotion_protection_updates", [])
++    if not isinstance(emotion_updates, list):
++        errors.append("emotion_protection_updates必须是数组")
++    else:
++        for update in emotion_updates:
++            if not isinstance(update, dict) or not update.get("event_id"):
++                errors.append("每条emotion_protection_update都需要event_id")
++                continue
++            if update.get("action") not in VALID_EMOTION_PROTECTION_ACTIONS:
++                errors.append(f"情绪保护{update.get('event_id')}的action无效")
